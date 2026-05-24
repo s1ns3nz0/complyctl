@@ -31,7 +31,7 @@ jobs:
       - name: Install test provider
         run: |
           mkdir -p ~/.complytime/providers
-          cp bin/complytime-providers-test ~/.complytime/providers/
+          cp bin/complyctl-provider-test ~/.complytime/providers/
 
       - name: Setup mock registry + workspace
         run: |
