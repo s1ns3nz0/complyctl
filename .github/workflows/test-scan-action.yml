@@ -1,0 +1,31 @@
+name: Test complyctl-scan Action
+
+on:
+  push:
+    branches: [feat/scan-action]
+  workflow_dispatch:
+
+jobs:
+  test-install:
+    name: "Test: Install + Version"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test complyctl-scan action (install only)
+        uses: ./.github/actions/complyctl-scan
+        id: scan
+        with:
+          version: v1.0.0-alpha.0
+          target: ""
+          policy-id: ""
+
+      - name: Verify install
+        run: |
+          complyctl version
+          echo "Install result: success"
+
+      - name: Check outputs
+        run: |
+          echo "result=${{ steps.scan.outputs.result }}"
+          echo "report-path=${{ steps.scan.outputs.report-path }}"

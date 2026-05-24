@@ -1,0 +1,167 @@
+# Copyright (c) 2024 The ComplyTime Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: "ComplyTime Scan"
+description: "Install complyctl, run a compliance scan, and post results to the GitHub Job Summary"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  version:
+    description: "complyctl release version (e.g., v1.0.0-alpha.0)"
+    required: false
+    default: "v1.0.0-alpha.0"
+  policy-id:
+    description: "Gemara policy ID to scan (e.g., nist-800-53-r5)"
+    required: false
+    default: ""
+  target:
+    description: "Target to scan (from complytime.yaml). If omitted, --policy-id is required."
+    required: false
+    default: ""
+  format:
+    description: "Output format: pretty, oscal, sarif"
+    required: false
+    default: "pretty"
+  workspace:
+    description: "Path to the directory containing complytime.yaml"
+    required: false
+    default: "."
+  verify-checksum:
+    description: "Verify SHA256 checksum of downloaded binary"
+    required: false
+    default: "true"
+
+outputs:
+  result:
+    description: "Scan result: 'pass' if all controls satisfied, 'fail' otherwise"
+    value: ${{ steps.scan.outputs.result }}
+  report-path:
+    description: "Path to the generated Markdown report"
+    value: ${{ steps.scan.outputs.report-path }}
+  evaluation-log:
+    description: "Path to the evaluation log"
+    value: ${{ steps.scan.outputs.evaluation-log }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install complyctl
+      id: install
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        VERIFY_CHECKSUM: ${{ inputs.verify-checksum }}
+      run: |
+        set -euo pipefail
+
+        VERSION_STRIPPED="${VERSION#v}"
+        ASSET="complyctl_linux_x86_64.tar.gz"
+        CHECKSUMS="complyctl_${VERSION_STRIPPED}_checksums.txt"
+        BASE_URL="https://github.com/complytime/complyctl/releases/download/${VERSION}"
+
+        echo "::group::Download complyctl ${VERSION}"
+        INSTALL_DIR="${HOME}/.complyctl/bin"
+        mkdir -p "${INSTALL_DIR}"
+
+        curl -sSfL "${BASE_URL}/${ASSET}" -o "/tmp/${ASSET}"
+
+        if [[ "${VERIFY_CHECKSUM}" == "true" ]]; then
+          curl -sSfL "${BASE_URL}/${CHECKSUMS}" -o "/tmp/${CHECKSUMS}"
+          cd /tmp
+          grep "${ASSET}" "${CHECKSUMS}" | sha256sum -c --status
+          echo "Checksum verified"
+          cd -
+        fi
+
+        tar xzf "/tmp/${ASSET}" -C "${INSTALL_DIR}"
+        chmod +x "${INSTALL_DIR}/complyctl"
+        echo "${INSTALL_DIR}" >> "${GITHUB_PATH}"
+        echo "::endgroup::"
+
+        echo "complyctl ${VERSION} installed to ${INSTALL_DIR}"
+        "${INSTALL_DIR}/complyctl" version
+
+    - name: Run compliance scan
+      id: scan
+      shell: bash
+      working-directory: ${{ inputs.workspace }}
+      env:
+        TARGET: ${{ inputs.target }}
+        POLICY_ID: ${{ inputs.policy-id }}
+        FORMAT: ${{ inputs.format }}
+      run: |
+        set -uo pipefail
+
+        SCAN_ARGS=""
+        if [[ -n "${TARGET}" ]]; then
+          SCAN_ARGS="${TARGET}"
+        fi
+        if [[ -n "${POLICY_ID}" ]]; then
+          SCAN_ARGS="${SCAN_ARGS} --policy-id ${POLICY_ID}"
+        fi
+        SCAN_ARGS="${SCAN_ARGS} --format ${FORMAT}"
+
+        echo "::group::complyctl scan ${SCAN_ARGS}"
+        SCAN_EXIT=0
+        complyctl scan ${SCAN_ARGS} 2>&1 | tee /tmp/complyctl-scan-output.txt || SCAN_EXIT=$?
+        echo "::endgroup::"
+
+        # Find generated report
+        REPORT_PATH=$(find .complytime/scan/ -name "report-*.md" -type f 2>/dev/null | sort -r | head -1)
+        EVAL_LOG=$(find .complytime/scan/ -name "*.yaml" -type f 2>/dev/null | sort -r | head -1)
+
+        echo "report-path=${REPORT_PATH}" >> "${GITHUB_OUTPUT}"
+        echo "evaluation-log=${EVAL_LOG}" >> "${GITHUB_OUTPUT}"
+
+        if [[ ${SCAN_EXIT} -eq 0 ]]; then
+          echo "result=pass" >> "${GITHUB_OUTPUT}"
+        else
+          echo "result=fail" >> "${GITHUB_OUTPUT}"
+        fi
+
+        exit 0
+
+    - name: Post Job Summary
+      shell: bash
+      working-directory: ${{ inputs.workspace }}
+      env:
+        REPORT_PATH: ${{ steps.scan.outputs.report-path }}
+        SCAN_RESULT: ${{ steps.scan.outputs.result }}
+      run: |
+        {
+          if [[ -n "${REPORT_PATH}" && -f "${REPORT_PATH}" ]]; then
+            cat "${REPORT_PATH}"
+          else
+            echo "## ComplyTime Scan Results"
+            echo ""
+            if [[ -f /tmp/complyctl-scan-output.txt ]]; then
+              echo '```'
+              cat /tmp/complyctl-scan-output.txt
+              echo '```'
+            else
+              echo "No report generated. Check the scan step logs for details."
+            fi
+          fi
+
+          echo ""
+          echo "---"
+          echo ""
+          if [[ "${SCAN_RESULT}" == "pass" ]]; then
+            echo "> **Result**: :white_check_mark: All controls satisfied"
+          else
+            echo "> **Result**: :x: One or more controls not satisfied"
+          fi
+        } >> "${GITHUB_STEP_SUMMARY}"
