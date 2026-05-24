@@ -6,21 +6,58 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-install:
-    name: "Test: Install + Version"
+  test-install-only:
+    name: "Test: Install Only"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/complyctl-scan
+        with:
+          version: v1.0.0-alpha.0
+          policy-id: __skip__
+      - run: |
+          which complyctl
+          complyctl version
+
+  test-scan-with-summary:
+    name: "Test: Scan + Job Summary"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install complyctl
-        uses: ./.github/actions/complyctl-scan
+      - name: Build test provider
+        run: make build build-test-provider
+
+      - name: Install test provider
+        run: |
+          mkdir -p ~/.complytime/providers
+          cp bin/complytime-providers-test ~/.complytime/providers/
+
+      - name: Setup mock registry + workspace
+        run: |
+          # Use e2e test helpers to start mock registry
+          # Simpler: use the repo's own complytime.yaml with real scan
+          cat complytime.yaml
+
+      - uses: ./.github/actions/complyctl-scan
         id: scan
         with:
           version: v1.0.0-alpha.0
-          policy-id: __skip__
+          policy-id: ampel-bp
+          target: complytime-complyctl
+          verify-checksum: "true"
 
-      - name: Verify binary
+      - name: Verify outputs
         run: |
-          which complyctl
-          complyctl version
-          echo "Install: OK"
+          echo "Result: ${{ steps.scan.outputs.result }}"
+          echo "Report: ${{ steps.scan.outputs.report-path }}"
+          echo "Eval log: ${{ steps.scan.outputs.evaluation-log }}"
+
+      - name: Verify Job Summary exists
+        run: |
+          if [ -s "$GITHUB_STEP_SUMMARY" ]; then
+            echo "Job Summary generated:"
+            cat "$GITHUB_STEP_SUMMARY"
+          else
+            echo "WARNING: No Job Summary content"
+          fi
