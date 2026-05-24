@@ -12,20 +12,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Test complyctl-scan action (install only)
+      - name: Install complyctl
         uses: ./.github/actions/complyctl-scan
         id: scan
         with:
           version: v1.0.0-alpha.0
-          target: ""
-          policy-id: ""
+          policy-id: __skip__
 
-      - name: Verify install
+      - name: Verify binary
         run: |
+          which complyctl
           complyctl version
-          echo "Install result: success"
-
-      - name: Check outputs
-        run: |
-          echo "result=${{ steps.scan.outputs.result }}"
-          echo "report-path=${{ steps.scan.outputs.report-path }}"
+          echo "Install: OK"

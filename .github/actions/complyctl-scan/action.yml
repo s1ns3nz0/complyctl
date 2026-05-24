@@ -115,6 +115,13 @@ runs:
         SCAN_ARGS="${SCAN_ARGS} --format ${FORMAT}"
 
         echo "::group::complyctl scan ${SCAN_ARGS}"
+        if [[ "${POLICY_ID}" == "__skip__" && -z "${TARGET}" ]]; then
+          echo "No policy-id or target — skipping scan (install-only mode)"
+          echo "result=skipped" >> "${GITHUB_OUTPUT}"
+          echo "report-path=" >> "${GITHUB_OUTPUT}"
+          echo "evaluation-log=" >> "${GITHUB_OUTPUT}"
+          exit 0
+        fi
         SCAN_EXIT=0
         complyctl scan ${SCAN_ARGS} 2>&1 | tee /tmp/complyctl-scan-output.txt || SCAN_EXIT=$?
         echo "::endgroup::"
