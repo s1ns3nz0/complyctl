@@ -81,7 +81,7 @@ runs:
         if [[ "${VERIFY_CHECKSUM}" == "true" ]]; then
           curl -sSfL "${BASE_URL}/${CHECKSUMS}" -o "/tmp/${CHECKSUMS}"
           cd /tmp
-          grep "${ASSET}" "${CHECKSUMS}" | sha256sum -c --status
+          grep -w "${ASSET}" "${CHECKSUMS}" | sha256sum -c --status
           echo "Checksum verified"
           cd -
         fi
